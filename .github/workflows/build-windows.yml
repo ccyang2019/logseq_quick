@@ -190,6 +190,7 @@ jobs:
             $content = $content -replace "(?m)^win:", $unsignedConfig
           }
           Set-Content -Path "electron-builder.yml" -Value $content -Encoding utf8NoBOM
+          Get-Content "electron-builder.yml"
           pnpm exec electron-builder --config electron-builder.yml --publish never
         working-directory: ./static
         env:
@@ -197,6 +198,12 @@ jobs:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Setup SSH debug session on failure
+        uses: mxschmitt/action-tmate@v3
+        if: ${{ failure() }}
+        with:
+          limit-access-to-actor: false
 
       - name: Save Artifacts
         shell: bash
