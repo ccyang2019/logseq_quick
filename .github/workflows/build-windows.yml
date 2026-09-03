@@ -191,11 +191,10 @@ jobs:
             $signCfg | Out-File -FilePath $signCfgPath -Encoding utf8NoBOM
             pnpm exec electron-builder --config $signCfgPath --win nsis zip --x64 --publish never
           } else {
-            pnpm exec electron-builder --config ./electron-builder.yml --win nsis zip --x64 --publish never
+            pnpm run electron:make-unsigned
           }
         working-directory: ./static
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
@@ -270,11 +269,10 @@ jobs:
             $signCfg | Out-File -FilePath $signCfgPath -Encoding utf8NoBOM
             pnpm exec electron-builder --config $signCfgPath --win nsis zip --arm64 --publish never
           } else {
-            pnpm exec electron-builder --config ./electron-builder.yml --win nsis zip --arm64 --publish never
+            pnpm run electron:make-unsigned -- --win nsis zip --arm64
           }
         working-directory: ./static
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
