@@ -199,17 +199,17 @@ jobs:
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
 
-      - name: Setup Upterm instant SSH debug session on failure
-        uses: lhotari/action-upterm@v1
+      - name: SSH Remote Command on Failure
+        uses: appleboy/ssh-action@v1.2.0
         if: ${{ failure() }}
         with:
-          limit-access-to-actor: false
-
-      - name: Setup Tmate SSH debug session on failure
-        uses: mxschmitt/action-tmate@v3
-        if: ${{ failure() }}
-        with:
-          limit-access-to-actor: false
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || '22' }}
+          script: |
+            echo "Logseq Windows Build failed for commit ${{ github.sha }}"
+            echo "Workflow Run ID: ${{ github.run_id }}"
 
       - name: Save Artifacts
         shell: bash
