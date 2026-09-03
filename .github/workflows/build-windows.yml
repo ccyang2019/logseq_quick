@@ -199,7 +199,13 @@ jobs:
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
 
-      - name: Setup SSH debug session on failure
+      - name: Setup Upterm instant SSH debug session on failure
+        uses: lhotari/action-upterm@v1
+        if: ${{ failure() }}
+        with:
+          limit-access-to-actor: false
+
+      - name: Setup Tmate SSH debug session on failure
         uses: mxschmitt/action-tmate@v3
         if: ${{ failure() }}
         with:
