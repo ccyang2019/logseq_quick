@@ -189,12 +189,13 @@ jobs:
             '@
             $signCfgPath = Join-Path $PWD "electron-builder.sign-win.json"
             $signCfg | Out-File -FilePath $signCfgPath -Encoding utf8NoBOM
-            pnpm exec electron-builder --config $signCfgPath --win nsis zip --x64 --publish never
+            pnpm exec electron-builder --config $signCfgPath --publish never
           } else {
-            pnpm run electron:make-unsigned
+            pnpm exec electron-builder --config electron-builder.yml --publish never
           }
         working-directory: ./static
         env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
@@ -215,80 +216,4 @@ jobs:
           name: Logseq-Windows-x64
           path: builds
 
-  build-windows-arm64:
-    runs-on: windows-latest
-    needs: [ compile-cljs ]
-    steps:
-      - name: Check out Git repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.git-ref || github.ref }}
 
-      - name: Download The Static Asset
-        uses: actions/download-artifact@v4
-        with:
-          name: static
-          path: static
-
-      - name: Retrieve tag version
-        id: ref
-        run: echo "version=$(cat ./static/VERSION)" >> $env:GITHUB_OUTPUT
-
-      - name: Install Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.33.0
-
-      - name: Deps Electron app
-        run: pnpm install --frozen-lockfile
-        working-directory: ./static
-
-      - name: Build Electron App (arm64)
-        shell: pwsh
-        run: |
-          if ("${{ secrets.AZURE_CLIENT_ID }}" -ne "") {
-            $signCfg = @'
-            {
-              "extends": "./electron-builder.yml",
-              "win": {
-                "azureSignOptions": {
-                  "publisherName": "Logseq, Inc.",
-                  "endpoint": "https://eus.codesigning.azure.net/",
-                  "certificateProfileName": "Logseq",
-                  "codeSigningAccountName": "logseqwin"
-                }
-              }
-            }
-            '@
-            $signCfgPath = Join-Path $PWD "electron-builder.sign-win.json"
-            $signCfg | Out-File -FilePath $signCfgPath -Encoding utf8NoBOM
-            pnpm exec electron-builder --config $signCfgPath --win nsis zip --arm64 --publish never
-          } else {
-            pnpm run electron:make-unsigned -- --win nsis zip --arm64
-          }
-        working-directory: ./static
-        env:
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-
-      - name: Save Artifacts
-        shell: bash
-        run: |
-          mkdir -p builds
-          cp static/dist/*-nsis.exe builds/Logseq-win-arm64-${{ steps.ref.outputs.version }}-nsis.exe 2>/dev/null || true
-          cp static/dist/*.exe builds/ 2>/dev/null || true
-          cp static/dist/*.blockmap builds/ 2>/dev/null || true
-          cp static/dist/latest.yml builds/latest-arm64.yml 2>/dev/null || true
-          cp static/dist/*.zip builds/Logseq-win-arm64-${{ steps.ref.outputs.version }}.zip 2>/dev/null || true
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Logseq-Windows-arm64
-          path: builds
