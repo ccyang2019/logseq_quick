@@ -181,11 +181,15 @@ jobs:
       - name: Build Electron App (x64)
         shell: pwsh
         run: |
+          $content = Get-Content "electron-builder.yml" -Raw
           if ("${{ secrets.AZURE_CLIENT_ID }}" -ne "") {
-            node -e 'const fs = require("fs"); let c = fs.readFileSync("electron-builder.yml", "utf8"); fs.writeFileSync("electron-builder.yml", c.replace(/^win:/m, "win:\n  azureSignOptions:\n    publisherName: \"Logseq, Inc.\"\n    endpoint: \"https://eus.codesigning.azure.net/\"\n    certificateProfileName: \"Logseq\"\n    codeSigningAccountName: \"logseqwin\""));'
+            $azureConfig = "win:`n  azureSignOptions:`n    publisherName: `"Logseq, Inc.`"`n    endpoint: `"https://eus.codesigning.azure.net/`"`n    certificateProfileName: `"Logseq`"`n    codeSigningAccountName: `"logseqwin`""
+            $content = $content -replace "(?m)^win:", $azureConfig
           } else {
-            node -e 'const fs = require("fs"); let c = fs.readFileSync("electron-builder.yml", "utf8"); fs.writeFileSync("electron-builder.yml", c.replace(/^win:/m, "win:\n  sign: null"));'
+            $unsignedConfig = "win:`n  sign: null"
+            $content = $content -replace "(?m)^win:", $unsignedConfig
           }
+          Set-Content -Path "electron-builder.yml" -Value $content -Encoding utf8NoBOM
           pnpm exec electron-builder --config electron-builder.yml --publish never
         working-directory: ./static
         env:
