@@ -182,23 +182,9 @@ jobs:
         shell: pwsh
         run: |
           if ("${{ secrets.AZURE_CLIENT_ID }}" -ne "") {
-            $azureConfig = @"
-
-win:
-  azureSignOptions:
-    publisherName: "Logseq, Inc."
-    endpoint: "https://eus.codesigning.azure.net/"
-    certificateProfileName: "Logseq"
-    codeSigningAccountName: "logseqwin"
-"@
-            Add-Content -Path "electron-builder.yml" -Value $azureConfig
+            Add-Content -Path "electron-builder.yml" -Value "", "win:", "  azureSignOptions:", '    publisherName: "Logseq, Inc."', '    endpoint: "https://eus.codesigning.azure.net/"', '    certificateProfileName: "Logseq"', '    codeSigningAccountName: "logseqwin"'
           } else {
-            $unsignedConfig = @"
-
-win:
-  sign: null
-"@
-            Add-Content -Path "electron-builder.yml" -Value $unsignedConfig
+            Add-Content -Path "electron-builder.yml" -Value "", "win:", "  sign: null"
           }
           pnpm exec electron-builder --config electron-builder.yml --publish never
         working-directory: ./static
