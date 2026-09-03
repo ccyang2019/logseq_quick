@@ -1,62 +1,284 @@
 name: Build Logseq Windows Executable
 
 on:
-  workflow_dispatch: # Allows manual trigger from the GitHub Actions tab
+  workflow_dispatch:
+    inputs:
+      git-ref:
+        description: "Release Git Ref (Which branch or tag to build?)"
+        required: false
+        default: "master"
   push:
     branches:
-      - master # or your custom working branch
+      - master
+
+env:
+  CLOJURE_VERSION: '1.12.4.1618'
+  NODE_VERSION: '24'
+  JAVA_VERSION: '21'
+  OCAML_VERSION: '5.1.1'
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
-
+  compile-cljs:
+    runs-on: ubuntu-22.04
     steps:
-      - name: Checkout repository
+      - name: Check out Git repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          ref: ${{ github.event.inputs.git-ref || github.ref }}
 
-      - name: Setup Java (JDK 21)
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '21'
-
-      - name: Setup Clojure
-        uses: DeLaGuardo/setup-clojure@12.5
-        with:
-          cli: 1.11.1.1435
-
-      - name: Setup Node.js
+      - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v3
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
         with:
-          version: latest
-          run_install: false
+          version: 10.33.0
 
-      - name: Install Node dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Get pnpm store directory path
+        id: pnpm-store-dir-path
+        run: echo "dir=$(pnpm store path --silent)" >> $GITHUB_OUTPUT
 
-      - name: Build parser and mldoc
-        run: pnpm run build:mldoc
+      - name: Cache pnpm store directory
+        uses: actions/cache@v4
+        id: pnpm-cache
+        with:
+          path: ${{ steps.pnpm-store-dir-path.outputs.dir }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
 
-      - name: Compile ClojureScript / Electron release
-        run: pnpm run release-electron
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: ${{ env.JAVA_VERSION }}
 
-      - name: Package Windows Executable with electron-builder
+      - name: Cache clojure deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+          key: ${{ runner.os }}-clojure-lib-${{ hashFiles('**/deps.edn') }}
+
+      - name: Setup clojure
+        uses: DeLaGuardo/setup-clojure@13.5
+        with:
+          cli: ${{ env.CLOJURE_VERSION }}
+
+      - name: Set up OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: ${{ env.OCAML_VERSION }}
+
+      - name: Fetch OCaml deps
+        working-directory: cli
+        run: opam install . --deps-only --with-test --yes
+
+      - name: Fetch CLI pnpm deps
+        run: pnpm --dir cli install --frozen-lockfile --ignore-workspace
+
+      - name: Retrieve tag version
+        id: ref
+        run: |
+          pkgver=$(node ./scripts/get-pkg-version.js "non-release")
+          echo "version=$pkgver" >> $GITHUB_OUTPUT
+
+      - name: Set Build Environment Variables
+        run: |
+          echo "ENABLE_PLUGINS=true" >> $GITHUB_ENV
+          echo "ENABLE_FILE_SYNC_PRODUCTION=true" >> $GITHUB_ENV
+
+      - name: Compile CLJS
+        run: |
+          pnpm install --frozen-lockfile
+          gulp build
+          pnpm cljs:release-electron
+          pnpm db-worker-node:bundle
+          opam exec -- pnpm cli:release
+          pnpm webpack-app-build
+          pnpm desktop:prepare-runtime-js
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: pnpm exec electron-builder --win --x64
+          LOGSEQ_SENTRY_DSN: ${{ secrets.LOGSEQ_SENTRY_DSN }}
+          LOGSEQ_POSTHOG_TOKEN: ${{ secrets.LOGSEQ_POSTHOG_TOKEN }}
 
-      - name: Upload Build Artifacts
+      - name: Verify bundled db-worker-node runtime
+        run: |
+          test -f ./dist/db-worker-node.js
+          test -f ./dist/db-worker-node-assets.json
+
+      - name: Verify bundled CLI
+        run: |
+          test -f ./static/js/logseq-cli.js
+          node ./static/js/logseq-cli.js --help >/tmp/logseq-cli-help.txt
+          grep -E "USAGE|Usage|COMMANDS|Commands" /tmp/logseq-cli-help.txt >/dev/null
+
+      - name: Verify desktop runtime script locations
+        run: |
+          test -f ./static/js/db-worker-node.js
+          test -f ./static/js/logseq-cli.js
+          test -f ./static/.agents/skills/logseq-cli/SKILL.md
+
+      - name: Update APP Version
+        run: |
+          sed -i 's/"version": "0.0.1"/"version": "${{ steps.ref.outputs.version }}"/g' ./package.json
+        working-directory: ./static
+
+      - name: Save VERSION file
+        run: echo "${{ steps.ref.outputs.version }}" > ./VERSION
+        working-directory: ./static
+
+      - name: Cache Static File
+        uses: actions/upload-artifact@v4
+        with:
+          name: static
+          path: static
+          include-hidden-files: true
+
+  build-windows-x64:
+    runs-on: windows-latest
+    needs: [ compile-cljs ]
+    steps:
+      - name: Download The Static Asset
+        uses: actions/download-artifact@v4
+        with:
+          name: static
+          path: static
+
+      - name: Retrieve tag version
+        id: ref
+        run: echo "version=$(cat ./static/VERSION)" >> $env:GITHUB_OUTPUT
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Deps Electron app
+        run: pnpm install --frozen-lockfile
+        working-directory: ./static
+
+      - name: Build Electron App (x64)
+        shell: pwsh
+        run: |
+          if ("${{ secrets.AZURE_CLIENT_ID }}" -ne "") {
+            $signCfg = @'
+            {
+              "extends": "./electron-builder.yml",
+              "win": {
+                "azureSignOptions": {
+                  "publisherName": "Logseq, Inc.",
+                  "endpoint": "https://eus.codesigning.azure.net/",
+                  "certificateProfileName": "Logseq",
+                  "codeSigningAccountName": "logseqwin"
+                }
+              }
+            }
+            '@
+            $signCfgPath = Join-Path $PWD "electron-builder.sign-win.json"
+            $signCfg | Out-File -FilePath $signCfgPath -Encoding utf8NoBOM
+            pnpm exec electron-builder --config $signCfgPath --win --x64 --publish never
+          } else {
+            pnpm exec electron-builder --win --x64 --publish never
+          }
+        working-directory: ./static
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Save Artifacts
+        shell: bash
+        run: |
+          mkdir -p builds
+          cp static/dist/*-nsis.exe builds/Logseq-win-x64-${{ steps.ref.outputs.version }}-nsis.exe 2>/dev/null || true
+          cp static/dist/*.exe builds/ 2>/dev/null || true
+          cp static/dist/*.blockmap builds/ 2>/dev/null || true
+          cp static/dist/latest.yml builds/latest-x64.yml 2>/dev/null || true
+          cp static/dist/*.zip builds/Logseq-win-x64-${{ steps.ref.outputs.version }}.zip 2>/dev/null || true
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Logseq-Windows-x64
-          path: |
-            dist/*.exe
-            dist/win-unpacked/
-          if-no-files-found: error
+          path: builds
+
+  build-windows-arm64:
+    runs-on: windows-latest
+    needs: [ compile-cljs ]
+    steps:
+      - name: Download The Static Asset
+        uses: actions/download-artifact@v4
+        with:
+          name: static
+          path: static
+
+      - name: Retrieve tag version
+        id: ref
+        run: echo "version=$(cat ./static/VERSION)" >> $env:GITHUB_OUTPUT
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Deps Electron app
+        run: pnpm install --frozen-lockfile
+        working-directory: ./static
+
+      - name: Build Electron App (arm64)
+        shell: pwsh
+        run: |
+          if ("${{ secrets.AZURE_CLIENT_ID }}" -ne "") {
+            $signCfg = @'
+            {
+              "extends": "./electron-builder.yml",
+              "win": {
+                "azureSignOptions": {
+                  "publisherName": "Logseq, Inc.",
+                  "endpoint": "https://eus.codesigning.azure.net/",
+                  "certificateProfileName": "Logseq",
+                  "codeSigningAccountName": "logseqwin"
+                }
+              }
+            }
+            '@
+            $signCfgPath = Join-Path $PWD "electron-builder.sign-win.json"
+            $signCfg | Out-File -FilePath $signCfgPath -Encoding utf8NoBOM
+            pnpm exec electron-builder --config $signCfgPath --win nsis zip --arm64 --publish never
+          } else {
+            pnpm exec electron-builder --win nsis zip --arm64 --publish never
+          }
+        working-directory: ./static
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Save Artifacts
+        shell: bash
+        run: |
+          mkdir -p builds
+          cp static/dist/*-nsis.exe builds/Logseq-win-arm64-${{ steps.ref.outputs.version }}-nsis.exe 2>/dev/null || true
+          cp static/dist/*.exe builds/ 2>/dev/null || true
+          cp static/dist/*.blockmap builds/ 2>/dev/null || true
+          cp static/dist/latest.yml builds/latest-arm64.yml 2>/dev/null || true
+          cp static/dist/*.zip builds/Logseq-win-arm64-${{ steps.ref.outputs.version }}.zip 2>/dev/null || true
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Logseq-Windows-arm64
+          path: builds
