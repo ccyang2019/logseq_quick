@@ -141,6 +141,11 @@ jobs:
     runs-on: windows-latest
     needs: [ compile-cljs ]
     steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.git-ref || github.ref }}
+
       - name: Download The Static Asset
         uses: actions/download-artifact@v4
         with:
@@ -184,12 +189,13 @@ jobs:
             '@
             $signCfgPath = Join-Path $PWD "electron-builder.sign-win.json"
             $signCfg | Out-File -FilePath $signCfgPath -Encoding utf8NoBOM
-            pnpm exec electron-builder --config $signCfgPath --win --x64 --publish never
+            pnpm exec electron-builder --config $signCfgPath --win nsis zip --x64 --publish never
           } else {
-            pnpm exec electron-builder --win --x64 --publish never
+            pnpm exec electron-builder --config ./electron-builder.yml --win nsis zip --x64 --publish never
           }
         working-directory: ./static
         env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
@@ -214,6 +220,11 @@ jobs:
     runs-on: windows-latest
     needs: [ compile-cljs ]
     steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.git-ref || github.ref }}
+
       - name: Download The Static Asset
         uses: actions/download-artifact@v4
         with:
@@ -259,10 +270,11 @@ jobs:
             $signCfg | Out-File -FilePath $signCfgPath -Encoding utf8NoBOM
             pnpm exec electron-builder --config $signCfgPath --win nsis zip --arm64 --publish never
           } else {
-            pnpm exec electron-builder --win nsis zip --arm64 --publish never
+            pnpm exec electron-builder --config ./electron-builder.yml --win nsis zip --arm64 --publish never
           }
         working-directory: ./static
         env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
